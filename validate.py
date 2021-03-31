@@ -8,6 +8,10 @@ import time
 import torch
 import torch.nn.parallel
 from contextlib import suppress
+import cv2
+import matplotlib.pyplot as plt
+import os
+import numpy as np
 
 from effdet import create_model, create_evaluator, create_dataset, create_loader
 from effdet.data import resolve_input_config
@@ -91,6 +95,48 @@ parser.add_argument('--torchscript', dest='torchscript', action='store_true',
                     help='convert model torchscript for inference')
 parser.add_argument('--results', default='./results.json', type=str, metavar='FILENAME',
                     help='JSON filename for evaluation results')
+parser.add_argument('--out_dir', default='results', type=str, help='destination directory of the resulting detections')
+
+
+classes = ['joint', 'joint-left', 'joint-right']
+
+font = cv2.FONT_HERSHEY_SIMPLEX
+fontScale = 0.75
+colors_pred = [(0, 0, 0), (0, 0, 255), (0, 0, 255)]
+colors_target = [(0, 0, 0), (0, 255, 0), (0, 255, 0)]
+thickness = 2
+
+
+def draw_bbox(img, bbox_pred, bbox_target=None):
+
+    def _draw_box(img, box, color, text=None, font=None, fontScale=None, thickness=None):
+        x, y, w, h = box[:4]
+        x_ = int(x + w)
+        y_ = int(y + h)
+        x = int(x)
+        y = int(y)
+        img = cv2.rectangle(img, (x, y), (x_, y_), color, thickness)
+
+        if text is not None:
+            textsize = cv2.getTextSize(text, font, fontScale, thickness)[0]
+            textX = int((x + x_) / 2 - textsize[0] / 2)
+            textY = int(y - textsize[1] / 2)
+            img = cv2.putText(img, text, (textX, textY), font, fontScale, color, thickness, cv2.LINE_AA)
+
+        return img
+
+    for i in range(bbox_pred.shape[0]):
+        b = int(bbox_pred[i, -1])
+        img = _draw_box(img, bbox_pred[i], colors_pred[b], thickness=thickness)
+
+        if bbox_target is not None:
+            # img = _draw_box(img, bbox_target[i], colors_target[b], text=classes[b], font=font, fontScale=fontScale,
+            #                 thickness=thickness)
+            img = _draw_box(img, bbox_target[i], colors_target[b], thickness=thickness)
+
+    # plt.imshow(img)
+    # plt.show()
+    return img
 
 
 def validate(args):
@@ -156,8 +202,13 @@ def validate(args):
     batch_time = AverageMeter()
     end = time.time()
     last_idx = len(loader) - 1
+    imgs = []
     with torch.no_grad():
         for i, (input, target) in enumerate(loader):
+            for b in range(input.shape[0]):
+                imgs.append(input[b].cpu().numpy())
+                # targets.append(target[b].cpu().numpy())
+
             with amp_autocast():
                 output = bench(input, img_info=target)
             evaluator.add_predictions(output, target)
@@ -177,7 +228,23 @@ def validate(args):
 
     mean_ap = 0.
     if dataset.parser.has_labels:
+        preds = [p[:2, :] for p in evaluator.predictions]
+        anns = evaluator.coco_api.imgToAnns
+        targets = [np.asarray((anns[k][0]['bbox'], anns[k][1]['bbox'])) for k in range(len(imgs))]
         mean_ap = evaluator.evaluate()
+        if not os.path.exists(args.out_dir):
+            os.mkdir(args.out_dir)
+        for i, img in enumerate(imgs):
+            img = imgs[i]
+            img_m = np.mean(img, axis=0)
+            for c in range(3):
+                img[c] = img_m
+            img_ = img.transpose(1, 2, 0)
+            m = img_.min()
+            M = img_.max()
+            img_ = ((img_ - m) / (M - m) * 255).astype('uint8').copy()
+            img_ = draw_bbox(img_, preds[i], targets[i])
+            cv2.imwrite(os.path.join(args.out_dir, '%d.jpg' % i), img_)
     else:
         evaluator.save(args.results)
 

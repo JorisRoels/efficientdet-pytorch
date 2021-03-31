@@ -91,6 +91,7 @@ parser.add_argument('-b', '--batch-size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--clip-grad', type=float, default=10.0, metavar='NORM',
                     help='Clip gradient norm (default: 10.0)')
+parser.add_argument('--cuda_device', type=int, default=0, help='Device to run computations')
 
 # Optimizer parameters
 parser.add_argument('--opt', default='momentum', type=str, metavar='OPTIMIZER',
@@ -227,7 +228,7 @@ def main():
     args.distributed = False
     if 'WORLD_SIZE' in os.environ:
         args.distributed = int(os.environ['WORLD_SIZE']) > 1
-    args.device = 'cuda:0'
+    args.device = 'cuda:' + str(args.cuda_device)
     args.world_size = 1
     args.rank = 0  # global rank
     if args.distributed:
