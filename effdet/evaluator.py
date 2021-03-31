@@ -5,6 +5,7 @@ import json
 import logging
 import time
 import numpy as np
+import os
 
 from .distributed import synchronize, is_main_process, all_gather_container
 from pycocotools.cocoeval import COCOeval
@@ -100,8 +101,10 @@ class CocoEvaluator(Evaluator):
         if not self.distributed or dist.get_rank() == 0:
             assert len(self.predictions)
             coco_predictions, coco_ids = self._coco_predictions()
-            json.dump(coco_predictions, open('./temp.json', 'w'), indent=4)
-            results = self.coco_api.loadRes('./temp.json')
+            r = np.random.rand()
+            json.dump(coco_predictions, open('./temp_%f.json' % r, 'w'), indent=4)
+            results = self.coco_api.loadRes('./temp_%f.json' % r)
+            os.remove('./temp_%f.json' % r)
             coco_eval = COCOeval(self.coco_api, results, 'bbox')
             coco_eval.params.imgIds = coco_ids  # score only ids we've used
             coco_eval.evaluate()
